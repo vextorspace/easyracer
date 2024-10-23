@@ -12,6 +12,7 @@ import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import kotlin.random.Random
 
 val client = HttpClient {
@@ -32,24 +33,35 @@ suspend fun scenario1(url: (Int) -> String): String = coroutineScope {
 }
 
 suspend fun scenario2(url: (Int) -> String): String = coroutineScope {
+    val latch = CountDownLatch(2)
+
     try {
         select {
             async {
                 try {
-                    client.get(url(2))
+                    client.get(url(2)).bodyAsText()
                 } catch (_: Exception) {
+                    latch.countDown()
                     awaitCancellation()
                 }
             }.onAwait { it }
             async {
                 try {
-                    client.get(url(2))
+                    client.get(url(2)).bodyAsText()
                 } catch (_: Exception) {
+                    latch.countDown()
                     awaitCancellation()
                 }
             }.onAwait { it }
-        }.bodyAsText()
+            async {
+                latch.await()
+                "Both tasks failed"
+            }.onAwait { it }
+        }
     } finally {
+        for (i in 0 until latch.count) {
+            latch.countDown()
+        }
         coroutineContext.cancelChildren()
     }
 }
