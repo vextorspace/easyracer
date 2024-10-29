@@ -12,6 +12,7 @@ import java.security.MessageDigest
 import java.time.Duration
 import java.time.Instant
 import java.util.UUID
+import java.util.concurrent.CountDownLatch
 import kotlin.random.Random
 
 val client = HttpClient {
@@ -217,8 +218,69 @@ suspend fun scenario10(url: (Int) -> String): String = coroutineScope {
     reporter()
 }
 
+suspend fun scenario11(url: (Int) -> String): String = coroutineScope {
+    val latch = CountDownLatch(2)
+    try {
+        select {
+            async {
+                try {
+                    println("getting url")
+                    client.get(url(11)).bodyAsText()
+                } catch (_: Exception) {
+                    println("awaiting cancelling")
+                    latch.countDown()
+                    awaitCancellation()
+                }
+            }.onAwait { it }
+            async {
+                try {
+                    println("getting url")
+                    client.get(url(11)).bodyAsText()
+                } catch (_: Exception) {
+                    println("awaiting cancelling")
+                    latch.countDown()
+                    awaitCancellation()
+                }
+            }.onAwait { it }
+            async {
+                latch.await()
+                println("cancelled")
+                "Both tasks failed"
+            }.onAwait { it }
+        }
+    } finally {
+        println("cancelling")
+        for (i in 0 until latch.count) {
+            latch.countDown()
+        }
+        println("done cancelled")
+        coroutineContext.cancelChildren()
+    }
+
+    try {
+        select {
+            async {
+                try {
+                    client.get(url(2))
+                } catch (_: Exception) {
+                    awaitCancellation()
+                }
+            }.onAwait { it }
+            async {
+                try {
+                    client.get(url(2))
+                } catch (_: Exception) {
+                    awaitCancellation()
+                }
+            }.onAwait { it }            
+        }.bodyAsText()
+    } finally {
+        coroutineContext.cancelChildren()
+    }
+}
+
 val scenarios = listOf(
-    ::scenario1,
+/*    ::scenario1,
     ::scenario2,
     ::scenario3,
     ::scenario4,
@@ -228,6 +290,9 @@ val scenarios = listOf(
     ::scenario8,
     ::scenario9,
     ::scenario10,
+
+ */
+    ::scenario11
 )
 
 suspend fun results(url: (Int) -> String) = scenarios.map {
